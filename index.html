@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skywatch SD</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌌</text></svg>">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: radial-gradient(ellipse at top, #0b1026 0%, #050813 60%, #02030a 100%);
+            color: #d6dbe6;
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+        .container { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 4rem; position: relative; z-index: 1; }
+        #stars {
+            position: fixed; inset: 0; pointer-events: none;
+            z-index: 0; overflow: hidden;
+        }
+        .star {
+            position: absolute;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 2px rgba(255,255,255,0.6);
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: var(--peak); }
+            50%      { opacity: calc(var(--peak) * 0.25); }
+        }
+        #moon {
+            position: fixed; top: 1rem; right: 1rem;
+            width: 64px; height: 64px;
+            z-index: 2;
+            filter: drop-shadow(0 0 8px rgba(240,233,214,0.35));
+        }
+        .moon-dark { fill: rgba(255,255,255,0.05); stroke: rgba(255,255,255,0.12); stroke-width: 0.6; }
+        .moon-lit  { fill: #f3ecd6; }
+        header { text-align: center; margin-bottom: 2rem; }
+        h1 { font-size: 2rem; margin: 0 0 .25rem; font-weight: 600; letter-spacing: -.02em; }
+        h1 .glow { background: linear-gradient(90deg, #c4b5fd, #fbbf24, #93c5fd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .tagline { color: #8b94a8; font-size: .9rem; }
+        .status { text-align: center; color: #8b94a8; padding: 2rem; }
+        .card {
+            background: rgba(20, 25, 45, 0.55);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1rem;
+            backdrop-filter: blur(8px);
+        }
+        .headline {
+            background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12));
+            border: 1px solid rgba(167,139,250,0.25);
+            padding: 1.5rem 1.75rem;
+        }
+        .headline-label { font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: #a78bfa; margin-bottom: .5rem; }
+        .headline-pick { font-size: 1.5rem; font-weight: 600; margin: 0 0 .35rem; }
+        .headline-pick .night { color: #fbbf24; }
+        .headline-pick .site { color: #93c5fd; }
+        .headline-detail { color: #b6bdcc; font-size: .95rem; }
+        .nights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: .75rem;
+            margin-top: 1rem;
+        }
+        .night-card {
+            background: rgba(15, 20, 38, 0.6);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: .9rem 1rem;
+        }
+        .night-day { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: #8b94a8; }
+        .night-date { font-weight: 600; font-size: 1rem; margin: .15rem 0 .5rem; }
+        .night-site { font-size: .85rem; color: #93c5fd; }
+        .night-meta { font-size: .75rem; color: #8b94a8; margin-top: .25rem; }
+        .score-bar {
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            margin-top: .55rem;
+            overflow: hidden;
+        }
+        .score-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #a78bfa); }
+        section h2 { font-size: 1rem; font-weight: 600; color: #b6bdcc; margin: 2rem 0 .5rem; }
+        table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+        th, td { padding: .5rem .6rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        th { font-weight: 500; color: #8b94a8; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+        td.score { font-variant-numeric: tabular-nums; color: #fbbf24; }
+        td.muted { color: #8b94a8; }
+        .pill {
+            display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+            font-size: .7rem; font-weight: 500;
+        }
+        .pill-bortle-2 { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .pill-bortle-3 { background: rgba(132,204,22,0.15); color: #a3e635; }
+        .pill-bortle-4 { background: rgba(234,179,8,0.15); color: #facc15; }
+        .pill-bortle-5 { background: rgba(249,115,22,0.15); color: #fb923c; }
+        footer { text-align: center; color: #5b6377; font-size: .8rem; margin-top: 2.5rem; }
+        footer a { color: #8b94a8; }
+        .galaxy-hint { color: #c4b5fd; font-size: .85rem; margin-top: .5rem; }
+    </style>
+</head>
+<body>
+    <div id="stars"></div>
+    <svg id="moon" viewBox="-30 -30 60 60" aria-label="current moon phase"></svg>
+    <div class="container">
+        <header>
+            <h1>🌌 <span class="glow">Skywatch SD</span></h1>
+            <p class="tagline">When and where to see stars near San Diego, this week. Scored as a % of each night's ceiling — only counts time when the sky is fully dark (sun below -18°) until <strong>midnight</strong>. Winter nights cap at ~4h of usable dark; summer caps near ~2.5h.</p>
+        </header>
+
+        <div id="content" class="status">Loading forecast…</div>
+
+        <a href="https://buymeacoffee.com/samiprehn" target="_blank" rel="noopener noreferrer" style="display:block;text-align:center;margin-top:2rem;color:#5b6377;text-decoration:none;font-size:.85rem;">Keep this page running</a>
+    </div>
+
+    <script>
+    // ── Starry sky background ────────────────────────────────────────
+    (function makeStars() {
+        const container = document.getElementById('stars');
+        const count = 220;
+        const w = window.innerWidth, h = Math.max(window.innerHeight, document.documentElement.scrollHeight);
+        for (let i = 0; i < count; i++) {
+            const s = document.createElement('div');
+            s.className = 'star';
+            const big = Math.random() < 0.12;
+            const size = big ? 1.8 + Math.random() * 1.8 : 0.6 + Math.random() * 1.2;
+            const opacity = 0.3 + Math.random() * 0.7;
+            s.style.left = Math.random() * 100 + 'vw';
+            s.style.top = (Math.random() * h) + 'px';
+            s.style.width = size + 'px';
+            s.style.height = size + 'px';
+            s.style.opacity = opacity;
+            if (Math.random() < 0.25) {
+                s.style.setProperty('--peak', opacity);
+                s.style.animation = `twinkle ${3 + Math.random() * 5}s ease-in-out infinite`;
+                s.style.animationDelay = (Math.random() * 6) + 's';
+            }
+            container.appendChild(s);
+        }
+    })();
+
+    // ── Moon icon (top right) ────────────────────────────────────────
+    function drawMoon() {
+        const svg = document.getElementById('moon');
+        const now = new Date();
+        const illum = moonIllumination(now);
+        const d = toDays(now);
+        const s = sunCoords(d), m = moonCoords(d);
+        let raDiff = ((m.ra - s.ra) * 180 / PI) % 360;
+        if (raDiff < 0) raDiff += 360;
+        const waxing = raDiff < 180;
+
+        const r = 28;
+        let inner = `<circle cx="0" cy="0" r="${r}" class="moon-dark"/>`;
+        if (illum > 0.99) {
+            inner += `<circle cx="0" cy="0" r="${r}" class="moon-lit"/>`;
+        } else if (illum > 0.01) {
+            const xR = Math.max(r * Math.abs(1 - 2 * illum), 0.01);
+            const outerSweep = waxing ? 1 : 0;
+            const innerSweep = illum < 0.5 ? 0 : 1;
+            const path = `M 0 ${-r} A ${r} ${r} 0 0 ${outerSweep} 0 ${r} A ${xR} ${r} 0 0 ${innerSweep} 0 ${-r} Z`;
+            inner += `<path d="${path}" class="moon-lit"/>`;
+        }
+        svg.innerHTML = inner;
+        svg.setAttribute('title', `${moonPhaseLabel(illum, now)} · ${Math.round(illum * 100)}%`);
+    }
+
+    // ── Sites ─────────────────────────────────────────────────────────
+    // bortle: approximate Bortle dark-sky class (2 = excellent, higher = brighter)
+    // grid: NWS gridpoint, hardcoded to skip /points/ lookup
+    // driveMin: rough drive time from downtown SD
+    const SITES = [
+        { name: 'Mt Laguna',         lat: 32.8694, lon: -116.4192, grid: 'SGX/85,16', bortle: 3, driveMin: 60,  place: 'Mt Laguna Observatory, Mt Laguna, CA' },
+        { name: 'Borrego Springs',   lat: 33.2588, lon: -116.3742, grid: 'SGX/89,33', bortle: 2, driveMin: 120, place: 'Borrego Springs, CA' },
+        { name: 'Palomar Mountain',  lat: 33.3597, lon: -116.8639, grid: 'SGX/72,40', bortle: 3, driveMin: 95,  place: 'Palomar Mountain State Park, CA' },
+        { name: 'Cuyamaca Rancho',   lat: 32.9486, lon: -116.5894, grid: 'SGX/79,21', bortle: 3, driveMin: 60,  place: 'Cuyamaca Rancho State Park, CA' },
+        { name: 'Julian',            lat: 33.0786, lon: -116.6022, grid: 'SGX/80,26', bortle: 4, driveMin: 75,  place: 'Julian, CA' },
+        { name: 'Pine Valley',       lat: 32.7553, lon: -116.6094, grid: 'SGX/77,12', bortle: 4, driveMin: 50,  place: 'Pine Valley, CA' },
+        { name: 'Los Peñasquitos Ranch House', lat: 32.9244, lon: -117.1289, grid: 'SGX/59,23', bortle: 6, driveMin: 25, place: 'Rancho de los Peñasquitos Adobe, San Diego, CA' },
+        { name: 'Kumeyaay Lake',     lat: 32.8418, lon: -117.0359, grid: 'SGX/62,19', bortle: 6, driveMin: 25, place: 'Kumeyaay Lake Campground, Mission Trails Regional Park, San Diego, CA' },
+    ];
+
+    // ── Astronomy (compact suncalc-style port) ───────────────────────
+    const PI = Math.PI, RAD = PI / 180;
+    const OBLIQUITY = RAD * 23.4397;
+
+    const toJulian = (d) => d.getTime() / 86400000 - 0.5 + 2440588;
+    const toDays = (d) => toJulian(d) - 2451545;
+
+    function solarMeanAnomaly(d) { return RAD * (357.5291 + 0.98560028 * d); }
+    function eclipticLongitude(M) {
+        const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+        const P = RAD * 102.9372;
+        return M + C + P + PI;
+    }
+    function sunCoords(d) {
+        const M = solarMeanAnomaly(d);
+        const L = eclipticLongitude(M);
+        return {
+            dec: Math.asin(Math.sin(OBLIQUITY) * Math.sin(L)),
+            ra:  Math.atan2(Math.sin(L) * Math.cos(OBLIQUITY), Math.cos(L)),
+        };
+    }
+    function moonCoords(d) {
+        const L = RAD * (218.316 + 13.176396 * d);
+        const M = RAD * (134.963 + 13.064993 * d);
+        const F = RAD * (93.272 + 13.229350 * d);
+        const lng = L + RAD * 6.289 * Math.sin(M);
+        const lat = RAD * 5.128 * Math.sin(F);
+        return {
+            ra:  Math.atan2(Math.sin(lng) * Math.cos(OBLIQUITY) - Math.tan(lat) * Math.sin(OBLIQUITY), Math.cos(lng)),
+            dec: Math.asin(Math.sin(lat) * Math.cos(OBLIQUITY) + Math.cos(lat) * Math.sin(OBLIQUITY) * Math.sin(lng)),
+            dist: 385001 - 20905 * Math.cos(M),
+        };
+    }
+    function siderealTime(d, lw) { return RAD * (280.16 + 360.9856235 * d) - lw; }
+    function altitudeFromHA(H, phi, dec) {
+        return Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+    }
+    function sunAltitude(date, lat, lon) {
+        const d = toDays(date);
+        const c = sunCoords(d);
+        const H = siderealTime(d, RAD * -lon) - c.ra;
+        return altitudeFromHA(H, RAD * lat, c.dec);
+    }
+    function moonAltitude(date, lat, lon) {
+        const d = toDays(date);
+        const c = moonCoords(d);
+        const H = siderealTime(d, RAD * -lon) - c.ra;
+        return altitudeFromHA(H, RAD * lat, c.dec);
+    }
+    function moonIllumination(date) {
+        const d = toDays(date);
+        const s = sunCoords(d);
+        const m = moonCoords(d);
+        const sdist = 149598000;
+        const phi = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) + Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra));
+        const inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi));
+        return (1 + Math.cos(inc)) / 2;
+    }
+    // Find the next new moon date (within ~45 days) by scanning daily illumination
+    // and returning the first local minimum below 5%.
+    function findNextNewMoon(fromDate) {
+        const samples = [];
+        for (let i = 0; i < 45; i++) {
+            const d = new Date(fromDate.getTime() + i * 86400000);
+            samples.push({ d, illum: moonIllumination(d) });
+        }
+        for (let i = 1; i < samples.length - 1; i++) {
+            if (samples[i].illum < samples[i - 1].illum && samples[i].illum < samples[i + 1].illum && samples[i].illum < 0.05) {
+                return samples[i].d;
+            }
+        }
+        return null;
+    }
+
+    function moonPhaseLabel(illum, date) {
+        // Use the sun-moon longitude difference to determine waxing vs waning
+        const d = toDays(date);
+        const s = sunCoords(d);
+        const m = moonCoords(d);
+        let diff = (m.ra - s.ra) * (180 / PI);
+        diff = ((diff % 360) + 360) % 360;
+        const waxing = diff < 180;
+        if (illum < 0.03) return 'New moon';
+        if (illum > 0.97) return 'Full moon';
+        if (illum < 0.47) return waxing ? 'Waxing crescent' : 'Waning crescent';
+        if (illum < 0.53) return waxing ? 'First quarter' : 'Last quarter';
+        return waxing ? 'Waxing gibbous' : 'Waning gibbous';
+    }
+
+    // ── NWS ──────────────────────────────────────────────────────────
+    function parseDuration(iso) {
+        const m = iso.match(/P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/);
+        if (!m) return 0;
+        return ((+(m[1]||0)*24 + +(m[2]||0))*60 + +(m[3]||0)) * 60000;
+    }
+    function valueAtTime(values, target) {
+        for (const e of values) {
+            const [s, dur] = e.validTime.split('/');
+            const start = new Date(s).getTime();
+            const end = start + parseDuration(dur);
+            if (target >= start && target < end) return e.value;
+        }
+        return null;
+    }
+    async function fetchGrid(grid) {
+        const r = await fetch(`https://api.weather.gov/gridpoints/${grid}`);
+        if (!r.ok) throw new Error(`NWS ${grid}: ${r.status}`);
+        const d = await r.json();
+        return (d.properties?.skyCover?.values) || [];
+    }
+
+    // ── Scoring ──────────────────────────────────────────────────────
+    // For each night: sample every 15 min from sunset to next sunrise.
+    // Dark sample = sun < -18° (astro twilight) AND moon < 0° (below horizon).
+    // Per dark sample: contribution = (1 - cloudFraction) * (15min in hours)
+    // Bortle bonus: B2→1.0, B3→0.85, B4→0.7, B5→0.55, B6→0.4
+    function bortleBonus(b) { return Math.max(0.3, 1 - (b - 2) * 0.15); }
+
+    // Theoretical ceiling for a night: full astro-dark hours in the window × Bortle 2 bonus (=1).
+    // Used to scale the score bar so a perfect winter night fills it; summer nights cap lower.
+    function maxScoreForNight(lat, lon, nightStart) {
+        const STEP_MIN = 15;
+        const HOURS_PER = STEP_MIN / 60;
+        const windowStartMs = nightStart + (WINDOW_START_HOUR - 12) * 3600000;
+        const windowEndMs   = nightStart + (WINDOW_END_HOUR   - 12) * 3600000;
+        const samples = Math.round((windowEndMs - windowStartMs) / (STEP_MIN * 60000));
+        let astroDarkH = 0;
+        for (let i = 0; i < samples; i++) {
+            const t = windowStartMs + i * STEP_MIN * 60000;
+            const sunAlt = sunAltitude(new Date(t), lat, lon) * (180 / PI);
+            if (sunAlt < -18) astroDarkH += HOURS_PER;
+        }
+        return astroDarkH;
+    }
+
+    // Usable evening window: local 8:00pm → midnight. Beyond this nobody's driving home.
+    const WINDOW_START_HOUR = 20; // 8pm
+    const WINDOW_END_HOUR = 24;   // midnight
+
+    function scoreNight(skyValues, lat, lon, bortle, nightStart) {
+        // nightStart: noon of the day to evaluate. We sample only the usable evening window.
+        const STEP_MIN = 15;
+        const HOURS_PER = STEP_MIN / 60;
+        const windowStartMs = nightStart + (WINDOW_START_HOUR - 12) * 3600000;
+        const windowEndMs   = nightStart + (WINDOW_END_HOUR   - 12) * 3600000;
+        const samples = Math.round((windowEndMs - windowStartMs) / (STEP_MIN * 60000));
+        let darkH = 0, clearDarkH = 0, totalCloud = 0, cloudSamples = 0;
+        let moonUpDuringDarkH = 0, moonIllumSum = 0, moonIllumWeight = 0;
+        let darkStart = null, darkEnd = null;
+        for (let i = 0; i < samples; i++) {
+            const t = windowStartMs + i * STEP_MIN * 60000;
+            const date = new Date(t);
+            const sunAlt = sunAltitude(date, lat, lon) * (180 / PI);
+            if (sunAlt >= -18) continue;
+            const moonAlt = moonAltitude(date, lat, lon) * (180 / PI);
+            let moonFactor = 1;
+            if (moonAlt > 0) {
+                const illum = moonIllumination(date);
+                moonFactor = Math.max(0.05, 1 - illum * 0.95);
+                moonUpDuringDarkH += HOURS_PER;
+                moonIllumSum += illum;
+                moonIllumWeight++;
+            }
+            darkH += HOURS_PER;
+            if (darkStart === null) darkStart = t;
+            darkEnd = t + STEP_MIN * 60000;
+            const cloud = valueAtTime(skyValues, t);
+            if (cloud != null) {
+                totalCloud += cloud;
+                cloudSamples++;
+                clearDarkH += (1 - cloud / 100) * moonFactor * HOURS_PER;
+            } else {
+                clearDarkH += 0.5 * moonFactor * HOURS_PER;
+            }
+        }
+        const score = clearDarkH * bortleBonus(bortle);
+        const avgCloud = cloudSamples ? totalCloud / cloudSamples : null;
+        const avgMoonIllum = moonIllumWeight ? moonIllumSum / moonIllumWeight : 0;
+        return { score, darkH, clearDarkH, avgCloud, moonUpDuringDarkH, avgMoonIllum, darkStart, darkEnd };
+    }
+
+    // Approximate Milky Way galactic core visibility check for SD-ish latitude.
+    // Core (Sagittarius) RA ≈ 17h45m = 266° → LST near that means core is high.
+    // Returns true if the core is above ~20° during any dark sample.
+    function galacticCoreVisible(lat, lon, darkStart, darkEnd) {
+        if (!darkStart || !darkEnd) return false;
+        const STEP = 30 * 60000;
+        const coreRA = RAD * 266.4, coreDec = RAD * -29;
+        for (let t = darkStart; t <= darkEnd; t += STEP) {
+            const d = toDays(new Date(t));
+            const H = siderealTime(d, RAD * -lon) - coreRA;
+            const alt = altitudeFromHA(H, RAD * lat, coreDec) * (180 / PI);
+            if (alt > 20) return true;
+        }
+        return false;
+    }
+
+    // ── Render ───────────────────────────────────────────────────────
+    function fmtDay(d) { return d.toLocaleDateString('en-US', { weekday: 'short' }); }
+    function fmtDate(d) { return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+    function fmtTime(t) { return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
+
+    async function run() {
+        const content = document.getElementById('content');
+        try {
+            // Fetch all sites in parallel
+            const skyData = await Promise.all(
+                SITES.map(s => fetchGrid(s.grid).catch(err => { console.warn(s.name, err); return []; }))
+            );
+
+            // Build 7 nights starting tonight (noon today through 7 days)
+            const nights = [];
+            const today = new Date();
+            today.setHours(12, 0, 0, 0);
+            for (let n = 0; n < 7; n++) {
+                const start = today.getTime() + n * 86400000;
+                const evening = new Date(start);
+                evening.setHours(20, 0, 0, 0);
+                const perSite = SITES.map((site, i) => {
+                    const result = scoreNight(skyData[i], site.lat, site.lon, site.bortle, start);
+                    return { site, ...result };
+                });
+                perSite.sort((a, b) => b.score - a.score);
+                const top = perSite[0];
+                const illum = moonIllumination(evening);
+                nights.push({
+                    date: new Date(start),
+                    evening,
+                    top,
+                    perSite,
+                    moonIllum: illum,
+                    moonPhase: moonPhaseLabel(illum, evening),
+                    coreVisible: top ? galacticCoreVisible(top.site.lat, top.site.lon, top.darkStart, top.darkEnd) : false,
+                    maxPossible: maxScoreForNight(SITES[0].lat, SITES[0].lon, start),
+                });
+            }
+
+            // Headline = max score across all nights × sites
+            let best = null;
+            nights.forEach(n => {
+                n.perSite.forEach(p => {
+                    if (!best || p.score > best.score) best = { ...p, night: n };
+                });
+            });
+
+            // If none of the 7 nights are near new moon, surface the next one
+            const newMoonNearby = nights.some(n => n.moonIllum < 0.10);
+            let newMoonBanner = '';
+            if (!newMoonNearby) {
+                const nextNew = findNextNewMoon(today);
+                if (nextNew) {
+                    const daysAway = Math.round((nextNew - today) / 86400000);
+                    newMoonBanner = `<div class="card" style="background:rgba(99,102,241,0.10);border-color:rgba(167,139,250,0.2);">
+                        <div class="headline-label">Next new moon</div>
+                        <div style="font-size:1.1rem;color:#e5e7eb;">${nextNew.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · ${daysAway} days from now</div>
+                        <div style="color:#8b94a8;font-size:.9rem;margin-top:.2rem;">Check back then for the darkest skies of the cycle.</div>
+                    </div>`;
+                }
+            }
+
+            content.classList.remove('status');
+            content.innerHTML = renderHeadline(best) + newMoonBanner + renderNights(nights) + renderTable(nights);
+        } catch (err) {
+            console.error(err);
+            content.innerHTML = `<div class="card">Couldn't load the forecast: ${err.message}. Try refreshing.</div>`;
+        }
+    }
+
+    function renderHeadline(b) {
+        if (!b || b.score < 0.5) {
+            return `<div class="card headline">
+                <div class="headline-label">This week</div>
+                <div class="headline-pick">No great nights — check back tomorrow</div>
+                <div class="headline-detail">All 7 nights either too cloudy or too moonlit. Skies clear up over time; the forecast updates throughout the day.</div>
+            </div>`;
+        }
+        const cloudTxt = b.avgCloud != null ? `${Math.round(b.avgCloud)}% clouds` : 'cloud forecast unavailable';
+        const moonTxt = b.night.moonIllum < 0.05 ? 'new moon'
+            : `${b.night.moonPhase.toLowerCase()} (${Math.round(b.night.moonIllum*100)}%)`;
+        const coreTxt = b.night.coreVisible ? '<div class="galaxy-hint">✨ Galactic core above 20° during the dark window</div>' : '';
+        return `<div class="card headline">
+            <div class="headline-label">Best night this week</div>
+            <div class="headline-pick"><span class="night">${fmtDay(b.night.date)} ${fmtDate(b.night.date)}</span> · <span class="site">${b.site.name}</span></div>
+            <div class="headline-detail">${b.clearDarkH.toFixed(1)} clear-dark hours · ${cloudTxt} · ${moonTxt} · Bortle ${b.site.bortle} · ${b.site.driveMin} min drive</div>
+            ${coreTxt}
+        </div>`;
+    }
+
+    function renderNights(nights) {
+        return `<section>
+            <h2>Next 7 nights</h2>
+            <div class="nights-grid">
+                ${nights.map(n => {
+                    const t = n.top;
+                    const pct = Math.min(100, Math.round((t.score / Math.max(n.maxPossible, 0.001)) * 100));
+                    const cloud = t.avgCloud != null ? `${Math.round(t.avgCloud)}% cloud` : 'no forecast';
+                    return `<div class="night-card">
+                        <div class="night-day">${fmtDay(n.date)}</div>
+                        <div class="night-date">${fmtDate(n.date)}</div>
+                        <div class="night-site">${t.site.name}</div>
+                        <div class="night-meta">${t.clearDarkH.toFixed(1)}h clear · ${cloud} · 🌙 ${Math.round(n.moonIllum*100)}%</div>
+                        <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </section>`;
+    }
+
+    function renderTable(nights) {
+        return `<section>
+            <h2>Site reference</h2>
+            <table>
+                <thead><tr><th>Site</th><th>Bortle</th><th>Drive</th><th>Best night</th><th>Score</th></tr></thead>
+                <tbody>
+                    ${SITES.map(site => {
+                        let bestNight = null, bestNorm = -1;
+                        nights.forEach(n => {
+                            const p = n.perSite.find(x => x.site.name === site.name);
+                            if (!p) return;
+                            const norm = p.score / Math.max(n.maxPossible, 0.001);
+                            if (norm > bestNorm) { bestNorm = norm; bestNight = n; }
+                        });
+                        return { site, bestNight, bestNorm };
+                    })
+                    .sort((a, b) => b.bestNorm - a.bestNorm || a.site.driveMin - b.site.driveMin)
+                    .map(({ site, bestNight, bestNorm }) => `<tr>
+                            <td>${site.name}</td>
+                            <td><span class="pill pill-bortle-${site.bortle}">B${site.bortle}</span></td>
+                            <td class="muted">${site.driveMin} min</td>
+                            <td class="muted">${bestNight ? fmtDay(bestNight.date) + ' ' + fmtDate(bestNight.date) : '—'}</td>
+                            <td class="score">${Math.round(bestNorm * 100)}%</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </section>`;
+    }
+
+    drawMoon();
+    run();
+    </script>
+</body>
+</html>
