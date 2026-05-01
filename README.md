@@ -1,8 +1,8 @@
-# Skywatch SD
+# Stargaze SD
 
 When and where to see stars near San Diego, this week.
 
-**Live:** https://samiprehn.github.io/skywatch/
+**Live:** https://samiprehn.github.io/stargaze/
 
 For each of the next 7 nights, picks the best dark-sky site within driving distance and shows:
 - Clear-dark hours and forecast cloud cover

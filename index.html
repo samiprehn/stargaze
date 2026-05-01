@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Skywatch SD</title>
+    <title>Stargaze SD</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌌</text></svg>">
     <style>
         * { box-sizing: border-box; }
@@ -109,7 +109,7 @@
     <svg id="moon" viewBox="-30 -30 60 60" aria-label="current moon phase"></svg>
     <div class="container">
         <header>
-            <h1>🌌 <span class="glow">Skywatch SD</span></h1>
+            <h1>🌌 <span class="glow">Stargaze SD</span></h1>
             <p class="tagline">When and where to see stars near San Diego, this week. Scored as a % of each night's ceiling — only counts time when the sky is fully dark (sun below -18°) until <strong>midnight</strong>. Winter nights cap at ~4h of usable dark; summer caps near ~2.5h.</p>
         </header>
 
@@ -343,26 +343,24 @@
             const date = new Date(t);
             const sunAlt = sunAltitude(date, lat, lon) * (180 / PI);
             if (sunAlt >= -18) continue;
+            // Skip samples with no NWS cloud forecast — don't penalize with a 50% guess.
+            const cloud = valueAtTime(skyValues, t);
+            if (cloud == null) continue;
             const moonAlt = moonAltitude(date, lat, lon) * (180 / PI);
-            let moonFactor = 1;
             if (moonAlt > 0) {
-                const illum = moonIllumination(date);
-                moonFactor = Math.max(0.05, 1 - illum * 0.95);
+                // Moon up — track stats but don't count toward score or cloud avg.
                 moonUpDuringDarkH += HOURS_PER;
-                moonIllumSum += illum;
+                moonIllumSum += moonIllumination(date);
                 moonIllumWeight++;
+                continue;
             }
+            // Moon-down astro-dark sample — counts toward everything.
             darkH += HOURS_PER;
             if (darkStart === null) darkStart = t;
             darkEnd = t + STEP_MIN * 60000;
-            const cloud = valueAtTime(skyValues, t);
-            if (cloud != null) {
-                totalCloud += cloud;
-                cloudSamples++;
-                clearDarkH += (1 - cloud / 100) * moonFactor * HOURS_PER;
-            } else {
-                clearDarkH += 0.5 * moonFactor * HOURS_PER;
-            }
+            totalCloud += cloud;
+            cloudSamples++;
+            clearDarkH += (1 - cloud / 100) * HOURS_PER;
         }
         const score = clearDarkH * bortleBonus(bortle);
         const avgCloud = cloudSamples ? totalCloud / cloudSamples : null;
@@ -499,7 +497,7 @@
 
     function renderTable(nights) {
         return `<section>
-            <h2>Site reference</h2>
+            <h2>Site comparison</h2>
             <table>
                 <thead><tr><th>Site</th><th>Bortle</th><th>Drive</th><th>Best night</th><th>Score</th></tr></thead>
                 <tbody>
