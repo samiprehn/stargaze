@@ -252,17 +252,28 @@
         const inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi));
         return (1 + Math.cos(inc)) / 2;
     }
-    // Find the next new moon date (within ~45 days) by scanning daily illumination
-    // and returning the first local minimum below 5%.
-    function findNextNewMoon(fromDate) {
-        const samples = [];
-        for (let i = 0; i < 45; i++) {
-            const d = new Date(fromDate.getTime() + i * 86400000);
-            samples.push({ d, illum: moonIllumination(d) });
-        }
-        for (let i = 1; i < samples.length - 1; i++) {
-            if (samples[i].illum < samples[i - 1].illum && samples[i].illum < samples[i + 1].illum && samples[i].illum < 0.05) {
-                return samples[i].d;
+    // Find the next "good night" — one where the moon is below the horizon for
+    // at least 85% of astronomical dark in the 8pm–midnight window. Captures the
+    // last-quarter → new → first-couple-days-past-new stretch.
+    function findNextGoodNight(fromDate, lat, lon) {
+        const STEP_MIN = 15;
+        const HOURS_PER = STEP_MIN / 60;
+        for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+            const noon = new Date(fromDate.getTime() + dayOffset * 86400000);
+            noon.setHours(12, 0, 0, 0);
+            const windowStartMs = noon.getTime() + (WINDOW_START_HOUR - 12) * 3600000;
+            const windowEndMs   = noon.getTime() + (WINDOW_END_HOUR   - 12) * 3600000;
+            const samples = Math.round((windowEndMs - windowStartMs) / (STEP_MIN * 60000));
+            let astroDark = 0, moonDown = 0;
+            for (let i = 0; i < samples; i++) {
+                const t = windowStartMs + i * STEP_MIN * 60000;
+                const date = new Date(t);
+                if (sunAltitude(date, lat, lon) * (180 / PI) >= -18) continue;
+                astroDark += HOURS_PER;
+                if (moonAltitude(date, lat, lon) * (180 / PI) <= 0) moonDown += HOURS_PER;
+            }
+            if (astroDark > 0 && moonDown / astroDark >= 0.85) {
+                return new Date(noon.getTime());
             }
         }
         return null;
@@ -437,23 +448,24 @@
                 });
             });
 
-            // If none of the 7 nights are near new moon, surface the next one
-            const newMoonNearby = nights.some(n => n.moonIllum < 0.10);
-            let newMoonBanner = '';
-            if (!newMoonNearby) {
-                const nextNew = findNextNewMoon(today);
-                if (nextNew) {
-                    const daysAway = Math.round((nextNew - today) / 86400000);
-                    newMoonBanner = `<div class="card" style="background:rgba(99,102,241,0.10);border-color:rgba(167,139,250,0.2);">
-                        <div class="headline-label">Next new moon</div>
-                        <div style="font-size:1.1rem;color:#e5e7eb;">${nextNew.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · ${daysAway} days from now</div>
-                        <div style="color:#8b94a8;font-size:.9rem;margin-top:.2rem;">Check back then for the darkest skies of the cycle.</div>
+            // If none of the 7 nights have the moon below the horizon for most of
+            // the dark window, surface the next "good" night.
+            const goodNightThisWeek = nights.some(n => n.top.moonUpDuringDarkH < 0.5);
+            let goodNightBanner = '';
+            if (!goodNightThisWeek) {
+                const nextGood = findNextGoodNight(today, SITES[0].lat, SITES[0].lon);
+                if (nextGood) {
+                    const daysAway = Math.round((nextGood - today) / 86400000);
+                    goodNightBanner = `<div class="card" style="background:rgba(99,102,241,0.10);border-color:rgba(167,139,250,0.2);">
+                        <div class="headline-label">Next good night</div>
+                        <div style="font-size:1.1rem;color:#e5e7eb;">${nextGood.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · ${daysAway} days from now</div>
+                        <div style="color:#8b94a8;font-size:.9rem;margin-top:.2rem;">Moon will be below the horizon during the dark window. Check back then.</div>
                     </div>`;
                 }
             }
 
             content.classList.remove('status');
-            content.innerHTML = renderHeadline(best) + newMoonBanner + renderNights(nights) + renderTable(nights);
+            content.innerHTML = renderHeadline(best) + goodNightBanner + renderNights(nights) + renderTable(nights);
         } catch (err) {
             console.error(err);
             content.innerHTML = `<div class="card">Couldn't load the forecast: ${err.message}. Try refreshing.</div>`;
