@@ -74,7 +74,17 @@
             padding: .9rem 1rem;
         }
         .night-day { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: #8b94a8; display: inline-block; margin-right: .4rem; vertical-align: baseline; }
-        .night-date { font-weight: 600; font-size: 1rem; margin: 0 0 .5rem; display: inline-block; vertical-align: baseline; }
+        .night-date { font-weight: 600; font-size: 1rem; display: inline-block; vertical-align: baseline; }
+        .night-when { margin-bottom: .5rem; }
+        @media (max-width: 600px) {
+            .night-card { display: grid; grid-template-columns: 1fr auto; column-gap: .5rem; align-items: baseline; }
+            .night-when { grid-column: 1; margin-bottom: 0; }
+            .night-site { grid-column: 2; text-align: right; }
+            .night-meta { grid-column: 1 / -1; }
+            .score-bar { grid-column: 1 / -1; }
+            .headline-pick .sep { display: none; }
+            .headline-pick .site { display: block; }
+        }
         .night-site { font-size: .85rem; color: #93c5fd; }
         .night-meta { font-size: .75rem; color: #8b94a8; margin-top: .25rem; }
         .score-bar {
@@ -128,14 +138,26 @@
         const container = document.getElementById('stars');
         const count = 220;
         const w = window.innerWidth, h = Math.max(window.innerHeight, document.documentElement.scrollHeight);
+        // Moon icon is fixed at top: 1rem, right: 1rem, 64x64. Reject any star
+        // landing inside its bounding circle (plus a small buffer for the glow).
+        const moonCx = w - 48, moonCy = 48, moonR = 40;
         for (let i = 0; i < count; i++) {
+            let leftPct, topPx, attempts = 0;
+            do {
+                leftPct = Math.random() * 100;
+                topPx = Math.random() * h;
+                const px = leftPct / 100 * w;
+                const dx = px - moonCx, dy = topPx - moonCy;
+                if (dx * dx + dy * dy > moonR * moonR) break;
+                attempts++;
+            } while (attempts < 8);
             const s = document.createElement('div');
             s.className = 'star';
             const big = Math.random() < 0.12;
             const size = big ? 1.8 + Math.random() * 1.8 : 0.6 + Math.random() * 1.2;
             const opacity = 0.3 + Math.random() * 0.7;
-            s.style.left = Math.random() * 100 + 'vw';
-            s.style.top = (Math.random() * h) + 'px';
+            s.style.left = leftPct + 'vw';
+            s.style.top = topPx + 'px';
             s.style.width = size + 'px';
             s.style.height = size + 'px';
             s.style.opacity = opacity;
@@ -481,7 +503,7 @@
         const coreTxt = b.night.coreVisible ? '<div class="galaxy-hint">✨ Galactic core above 20° during the dark window</div>' : '';
         return `<div class="card headline">
             <div class="headline-label">Best night this week</div>
-            <div class="headline-pick"><span class="night">${fmtDay(b.night.date)} ${fmtDate(b.night.date)}</span> · <span class="site">${b.site.name}</span></div>
+            <div class="headline-pick"><span class="night">${fmtDay(b.night.date)} ${fmtDate(b.night.date)}</span><span class="sep"> · </span><span class="site">${b.site.name}</span></div>
             <div class="headline-detail">${b.clearDarkH.toFixed(1)} clear-dark hours · ${cloudTxt} · ${moonTxt} · Bortle ${b.site.bortle} · ${b.site.driveMin} min drive</div>
             ${coreTxt}
         </div>`;
@@ -496,8 +518,10 @@
                     const pct = Math.min(100, Math.round((t.score / Math.max(n.maxPossible, 0.001)) * 100));
                     const cloud = t.avgCloud != null ? `${Math.round(t.avgCloud)}% cloud` : 'no forecast';
                     return `<div class="night-card">
-                        <div class="night-day">${fmtDay(n.date)}</div>
-                        <div class="night-date">${fmtDate(n.date)}</div>
+                        <div class="night-when">
+                            <span class="night-day">${fmtDay(n.date)}</span>
+                            <span class="night-date">${fmtDate(n.date)}</span>
+                        </div>
                         <div class="night-site">${t.site.name}</div>
                         <div class="night-meta">${t.clearDarkH.toFixed(1)}h clear · ${cloud} · 🌙 ${Math.round(n.moonIllum*100)}%</div>
                         <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
