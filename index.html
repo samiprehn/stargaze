@@ -553,7 +553,7 @@
                             <td><span class="pill pill-bortle-${site.bortle}">B${site.bortle}</span></td>
                             <td class="muted">${site.driveMin} min</td>
                             <td class="muted">${bestNight ? fmtDay(bestNight.date) + ' ' + fmtDate(bestNight.date) : '—'}</td>
-                            <td class="score" style="color: hsl(45, ${Math.round(50 + bestNorm * 50)}%, ${Math.round(35 + bestNorm * 35)}%);">${Math.round(bestNorm * 100)}%</td>
+                            <td class="score" style="color: hsl(${Math.round(50 - bestNorm * 5)}, ${Math.round(5 + bestNorm * 95)}%, ${Math.round(30 + bestNorm * 45)}%);">${Math.round(bestNorm * 100)}%</td>
                         </tr>`).join('')}
                 </tbody>
             </table>
