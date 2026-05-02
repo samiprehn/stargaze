@@ -75,6 +75,11 @@
         }
         .night-day { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: #8b94a8; }
         .night-date { font-weight: 600; font-size: 1rem; margin: .15rem 0 .5rem; }
+        @media (max-width: 600px) {
+            .night-day, .night-date { display: inline-block; vertical-align: baseline; }
+            .night-day { margin-right: .4rem; }
+            .night-date { margin: 0 0 .5rem; }
+        }
         .night-site { font-size: .85rem; color: #93c5fd; }
         .night-meta { font-size: .75rem; color: #8b94a8; margin-top: .25rem; }
         .score-bar {
