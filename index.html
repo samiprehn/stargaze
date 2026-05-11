@@ -31,7 +31,7 @@
             50%      { opacity: calc(var(--peak) * 0.25); }
         }
         #moon {
-            position: fixed; top: 1rem; right: 1rem;
+            position: absolute; top: 1rem; right: 1rem;
             width: 64px; height: 64px;
             z-index: 2;
             filter: drop-shadow(0 0 8px rgba(240,233,214,0.35));
@@ -101,6 +101,8 @@
         th { font-weight: 500; color: #8b94a8; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
         td.score { font-variant-numeric: tabular-nums; }
         td.muted { color: #8b94a8; }
+        td a { color: #93c5fd; text-decoration: none; border-bottom: 1px dotted rgba(147,197,253,0.4); }
+        td a:hover { color: #bfdbfe; border-bottom-color: rgba(147,197,253,0.8); }
         .pill {
             display: inline-block; padding: .1rem .5rem; border-radius: 999px;
             font-size: .7rem; font-weight: 500;
@@ -549,7 +551,7 @@
                     })
                     .sort((a, b) => b.bestNorm - a.bestNorm || a.site.driveMin - b.site.driveMin)
                     .map(({ site, bestNight, bestNorm }) => `<tr>
-                            <td>${site.name}</td>
+                            <td><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(site.place)}" target="_blank" rel="noopener">${site.name}</a></td>
                             <td><span class="pill pill-bortle-${site.bortle}">B${site.bortle}</span></td>
                             <td class="muted">${site.driveMin} min</td>
                             <td class="muted">${bestNight ? fmtDay(bestNight.date) + ' ' + fmtDate(bestNight.date) : '—'}</td>
