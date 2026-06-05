@@ -1,8 +1,8 @@
 {
-  "last_alert_date": "2026-06-04",
+  "last_alert_date": "2026-06-05",
   "last_alert": {
     "site": "Borrego Springs",
-    "day": "2026-06-08",
-    "pct": 0.991
+    "day": "2026-06-10",
+    "pct": 1.0
   }
 }
