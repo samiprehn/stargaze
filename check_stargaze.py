@@ -1,39 +1,43 @@
 """Stargaze SD alerts.
 
-Once a day, computes the same score Stargaze SD shows on the page
-(score normalized to seasonal max %) for every site over the next 7
-nights. If any night×site clears 90%, sends a single ntfy notification
-linking back to the live page. seen.json caps alerts to once per day.
+Once a day, computes the same sky score Stargaze SD shows on the page
+(quality dark hours x Bortle bonus, normalized to the night's seasonal max)
+for every site over the next 7 nights. If any night x site clears 90%,
+sends a single ntfy notification linking back to the live page. seen.json
+caps alerts to once per day.
+
+Mirrors the scoring in index.html: per 15-min astro-dark sample,
+cloud_factor x moon_factor partial credit (drive time is ranking-only on
+the site and never affects the alert).
 """
 
 import datetime as dt
 import json
 import math
 import os
-import re
 
 import requests
+from zoneinfo import ZoneInfo
 
 NTFY_TOPIC = os.environ['NTFY_TOPIC']
 SITE_URL = 'https://samiprehn.github.io/stargaze/'
 SEEN_FILE = 'seen.json'
+PACIFIC = ZoneInfo('America/Los_Angeles')
 
-# Threshold: alert if any site×night >= this fraction of the seasonal max.
+# Threshold: alert if any site x night >= this fraction of the seasonal max.
 ALERT_THRESHOLD = 0.90
 
 # Sites — mirrors index.html
 SITES = [
-    {'name': 'Mt Laguna',                'lat': 32.8694, 'lon': -116.4192, 'grid': 'SGX/85,16', 'bortle': 3, 'driveMin': 60},
-    {'name': 'Borrego Springs',          'lat': 33.2588, 'lon': -116.3742, 'grid': 'SGX/89,33', 'bortle': 2, 'driveMin': 120},
-    {'name': 'Palomar Mountain',         'lat': 33.3597, 'lon': -116.8639, 'grid': 'SGX/72,40', 'bortle': 3, 'driveMin': 95},
-    {'name': 'Cuyamaca Rancho',          'lat': 32.9486, 'lon': -116.5894, 'grid': 'SGX/79,21', 'bortle': 3, 'driveMin': 60},
-    {'name': 'Julian',                   'lat': 33.0786, 'lon': -116.6022, 'grid': 'SGX/80,26', 'bortle': 4, 'driveMin': 75},
-    {'name': 'Pine Valley',              'lat': 32.7553, 'lon': -116.6094, 'grid': 'SGX/77,12', 'bortle': 4, 'driveMin': 50},
-    {'name': 'Los Peñasquitos Ranch House', 'lat': 32.9244, 'lon': -117.1289, 'grid': 'SGX/59,23', 'bortle': 6, 'driveMin': 25},
-    {'name': 'Kumeyaay Lake',            'lat': 32.8418, 'lon': -117.0359, 'grid': 'SGX/62,19', 'bortle': 6, 'driveMin': 25},
+    {'name': 'Mt Laguna',                'lat': 32.8694, 'lon': -116.4192, 'bortle': 3, 'driveMin': 60},
+    {'name': 'Borrego Springs',          'lat': 33.2588, 'lon': -116.3742, 'bortle': 2, 'driveMin': 120},
+    {'name': 'Palomar Mountain',         'lat': 33.3597, 'lon': -116.8639, 'bortle': 3, 'driveMin': 95},
+    {'name': 'Cuyamaca Rancho',          'lat': 32.9486, 'lon': -116.5894, 'bortle': 3, 'driveMin': 60},
+    {'name': 'Julian',                   'lat': 33.0786, 'lon': -116.6022, 'bortle': 4, 'driveMin': 75},
+    {'name': 'Pine Valley',              'lat': 32.7553, 'lon': -116.6094, 'bortle': 4, 'driveMin': 50},
+    {'name': 'Los Peñasquitos Ranch House', 'lat': 32.9244, 'lon': -117.1289, 'bortle': 6, 'driveMin': 25},
+    {'name': 'Kumeyaay Lake',            'lat': 32.8418, 'lon': -117.0359, 'bortle': 6, 'driveMin': 25},
 ]
-
-UA = {'User-Agent': 'stargaze-alerts (sami.prehn@gmail.com)'}
 
 # Window: 8pm to midnight local
 WINDOW_START_HOUR = 20
@@ -81,6 +85,7 @@ def moon_coords(d):
     return (
         math.asin(math.sin(lat) * math.cos(OBLIQUITY) + math.cos(lat) * math.sin(OBLIQUITY) * math.sin(lng)),  # dec
         math.atan2(math.sin(lng) * math.cos(OBLIQUITY) - math.tan(lat) * math.sin(OBLIQUITY), math.cos(lng)),  # ra
+        385001 - 20905 * math.cos(M),  # dist (km)
     )
 
 
@@ -101,38 +106,54 @@ def sun_altitude(date, lat, lon):
 
 def moon_altitude(date, lat, lon):
     d = to_days(date)
-    dec, ra = moon_coords(d)
+    dec, ra, _ = moon_coords(d)
     H = sidereal_time(d, RAD * -lon) - ra
     return altitude_from_ha(H, RAD * lat, dec)
 
 
-# ── NWS forecast ─────────────────────────────────────────────────────
-_DUR_RE = re.compile(r'P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?')
+def moon_illumination(date):
+    d = to_days(date)
+    s_dec, s_ra = sun_coords(d)
+    m_dec, m_ra, m_dist = moon_coords(d)
+    sdist = 149598000
+    phi = math.acos(math.sin(s_dec) * math.sin(m_dec)
+                    + math.cos(s_dec) * math.cos(m_dec) * math.cos(s_ra - m_ra))
+    inc = math.atan2(sdist * math.sin(phi), m_dist - sdist * math.cos(phi))
+    return (1 + math.cos(inc)) / 2
 
 
-def parse_duration_seconds(iso):
-    m = _DUR_RE.match(iso)
-    if not m:
-        return 0
-    d, h, mn = (int(x) if x else 0 for x in m.groups())
-    return ((d * 24 + h) * 60 + mn) * 60
-
-
-def value_at_time(values, target_dt):
-    for entry in values:
-        start_str, dur_str = entry['validTime'].split('/')
-        start = dt.datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-        end = start + dt.timedelta(seconds=parse_duration_seconds(dur_str))
-        if start <= target_dt < end:
-            return entry['value']
-    return None
-
-
-def fetch_grid(grid):
-    r = requests.get(f'https://api.weather.gov/gridpoints/{grid}', headers=UA, timeout=30)
+# ── Cloud layers (Open-Meteo) ────────────────────────────────────────
+def fetch_cloud_layers():
+    """One multi-location request: hourly low/mid/high cloud cover per site."""
+    r = requests.get(
+        'https://api.open-meteo.com/v1/forecast',
+        params={
+            'latitude': ','.join(str(s['lat']) for s in SITES),
+            'longitude': ','.join(str(s['lon']) for s in SITES),
+            'hourly': 'cloud_cover_low,cloud_cover_mid,cloud_cover_high',
+            'forecast_days': 7,
+            'timezone': 'America/Los_Angeles',
+        },
+        timeout=30,
+    )
     r.raise_for_status()
-    props = r.json().get('properties', {})
-    return (props.get('skyCover') or {}).get('values', []) or []
+    return r.json()
+
+
+def clouds_at(result, local_dt):
+    """local_dt must be tz-aware; rounds to nearest hour in Pacific time."""
+    rounded = (local_dt + dt.timedelta(minutes=30)).astimezone(PACIFIC)
+    key = rounded.strftime('%Y-%m-%dT%H:00')
+    h = result['hourly']
+    try:
+        i = h['time'].index(key)
+    except ValueError:
+        return None
+    return {
+        'low': h['cloud_cover_low'][i],
+        'mid': h['cloud_cover_mid'][i],
+        'high': h['cloud_cover_high'][i],
+    }
 
 
 # ── Scoring (mirrors index.html) ─────────────────────────────────────
@@ -140,35 +161,42 @@ def bortle_bonus(b):
     return max(0.3, 1 - (b - 2) * 0.15)
 
 
+def cloud_factor(c):
+    low_mid = min(100, c['low'] + c['mid'])
+    return ((1 - low_mid / 100) ** 2) * (1 - 0.4 * c['high'] / 100)
+
+
+def moon_factor(date, lat, lon):
+    alt_deg = moon_altitude(date, lat, lon) * (180 / math.pi)
+    if alt_deg <= 0:
+        return 1
+    return 1 - moon_illumination(date) * min(1, alt_deg / 40)
+
+
 def night_window(noon_local):
-    """Returns (start, end) datetimes for the 8pm-midnight evening window
-    relative to local noon-of-day (Pacific time)."""
     start = noon_local + dt.timedelta(hours=WINDOW_START_HOUR - 12)
     end = noon_local + dt.timedelta(hours=WINDOW_END_HOUR - 12)
     return start, end
 
 
-def score_night(sky_values, lat, lon, bortle, noon_local):
+def score_night(site_result, lat, lon, bortle, noon_local):
     start, end = night_window(noon_local)
     samples = round((end - start).total_seconds() / 60 / STEP_MIN)
-    clear_dark_h = 0.0
+    quality_h = 0.0
     for i in range(samples):
         t = start + dt.timedelta(minutes=i * STEP_MIN)
         sun_alt = sun_altitude(t, lat, lon) * (180 / math.pi)
         if sun_alt >= -18:
             continue
-        cloud = value_at_time(sky_values, t)
-        if cloud is None:
+        c = clouds_at(site_result, t)
+        if c is None:
             continue
-        moon_alt = moon_altitude(t, lat, lon) * (180 / math.pi)
-        if moon_alt > 0:
-            continue
-        clear_dark_h += (1 - cloud / 100) * HOURS_PER_STEP
-    return clear_dark_h * bortle_bonus(bortle)
+        quality_h += cloud_factor(c) * moon_factor(t, lat, lon) * HOURS_PER_STEP
+    return quality_h * bortle_bonus(bortle)
 
 
 def max_score_for_night(lat, lon, noon_local):
-    """Theoretical ceiling: full astro-dark in the window × Bortle 2 bonus (=1)."""
+    """Theoretical ceiling: full astro-dark in the window x Bortle 2 bonus (=1)."""
     start, end = night_window(noon_local)
     samples = round((end - start).total_seconds() / 60 / STEP_MIN)
     astro_dark_h = 0.0
@@ -203,24 +231,14 @@ def main():
         print(f'Already alerted today ({today_iso}); exiting.')
         return
 
-    # Pacific time (US/Pacific). For SD, naive local-noon-of-day works fine for
-    # window math because the sun/moon altitude functions use UTC timestamps.
-    pacific = dt.timezone(dt.timedelta(hours=-7))  # PDT in May; fine for evening calc
-    grids_cache = {}
+    cloud_data = fetch_cloud_layers()
 
     best = None
     for n in range(7):
         day = today + dt.timedelta(days=n)
-        noon_local = dt.datetime(day.year, day.month, day.day, 12, 0, 0, tzinfo=pacific)
-        for s in SITES:
-            if s['grid'] not in grids_cache:
-                try:
-                    grids_cache[s['grid']] = fetch_grid(s['grid'])
-                except Exception as e:
-                    print(f"  fetch {s['grid']} failed: {e}")
-                    grids_cache[s['grid']] = []
-            sky = grids_cache[s['grid']]
-            score = score_night(sky, s['lat'], s['lon'], s['bortle'], noon_local)
+        noon_local = dt.datetime(day.year, day.month, day.day, 12, 0, 0, tzinfo=PACIFIC)
+        for s, result in zip(SITES, cloud_data):
+            score = score_night(result, s['lat'], s['lon'], s['bortle'], noon_local)
             cap = max_score_for_night(s['lat'], s['lon'], noon_local)
             pct = (score / cap) if cap > 0 else 0
             print(f"  {day.strftime('%a %b %-d')} {s['name']}: {pct*100:.0f}%")
@@ -235,7 +253,7 @@ def main():
     pct_int = round(best['pct'] * 100)
     day_str = best['day'].strftime('%a %b %-d')
     title = f"🌌 Great stargazing {day_str}"
-    message = f"{best['site']['name']} · {pct_int}% · ~{best['score']:.1f}h dark · {best['site']['driveMin']} min drive"
+    message = f"{best['site']['name']} · {pct_int}% · ~{best['score']:.1f}h quality dark · {best['site']['driveMin']} min drive"
 
     requests.post(
         'https://ntfy.sh/',
