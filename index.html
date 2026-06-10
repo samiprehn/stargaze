@@ -200,17 +200,16 @@
 
     // ── Sites ─────────────────────────────────────────────────────────
     // bortle: approximate Bortle dark-sky class (2 = excellent, higher = brighter)
-    // grid: NWS gridpoint, hardcoded to skip /points/ lookup
     // driveMin: rough drive time from downtown SD
     const SITES = [
-        { name: 'Mt Laguna',         lat: 32.8694, lon: -116.4192, grid: 'SGX/85,16', bortle: 3, driveMin: 60,  place: 'Mt Laguna Observatory, Mt Laguna, CA' },
-        { name: 'Borrego Springs',   lat: 33.2588, lon: -116.3742, grid: 'SGX/89,33', bortle: 2, driveMin: 120, place: 'Borrego Springs, CA' },
-        { name: 'Palomar Mountain',  lat: 33.3597, lon: -116.8639, grid: 'SGX/72,40', bortle: 3, driveMin: 95,  place: 'Palomar Mountain State Park, CA' },
-        { name: 'Cuyamaca Rancho',   lat: 32.9486, lon: -116.5894, grid: 'SGX/79,21', bortle: 3, driveMin: 60,  place: 'Cuyamaca Rancho State Park, CA' },
-        { name: 'Julian',            lat: 33.0786, lon: -116.6022, grid: 'SGX/80,26', bortle: 4, driveMin: 75,  place: 'Julian, CA' },
-        { name: 'Pine Valley',       lat: 32.7553, lon: -116.6094, grid: 'SGX/77,12', bortle: 4, driveMin: 50,  place: 'Pine Valley, CA' },
-        { name: 'Los Peñasquitos Ranch House', lat: 32.9244, lon: -117.1289, grid: 'SGX/59,23', bortle: 6, driveMin: 25, place: 'Rancho de los Peñasquitos Adobe, San Diego, CA' },
-        { name: 'Kumeyaay Lake',     lat: 32.8418, lon: -117.0359, grid: 'SGX/62,19', bortle: 6, driveMin: 25, place: 'Kumeyaay Lake Campground, Mission Trails Regional Park, San Diego, CA' },
+        { name: 'Mt Laguna',         lat: 32.8694, lon: -116.4192, bortle: 3, driveMin: 60,  place: 'Mt Laguna Observatory, Mt Laguna, CA' },
+        { name: 'Borrego Springs',   lat: 33.2588, lon: -116.3742, bortle: 2, driveMin: 120, place: 'Borrego Springs, CA' },
+        { name: 'Palomar Mountain',  lat: 33.3597, lon: -116.8639, bortle: 3, driveMin: 95,  place: 'Palomar Mountain State Park, CA' },
+        { name: 'Cuyamaca Rancho',   lat: 32.9486, lon: -116.5894, bortle: 3, driveMin: 60,  place: 'Cuyamaca Rancho State Park, CA' },
+        { name: 'Julian',            lat: 33.0786, lon: -116.6022, bortle: 4, driveMin: 75,  place: 'Julian, CA' },
+        { name: 'Pine Valley',       lat: 32.7553, lon: -116.6094, bortle: 4, driveMin: 50,  place: 'Pine Valley, CA' },
+        { name: 'Los Peñasquitos Ranch House', lat: 32.9244, lon: -117.1289, bortle: 6, driveMin: 25, place: 'Rancho de los Peñasquitos Adobe, San Diego, CA' },
+        { name: 'Kumeyaay Lake',     lat: 32.8418, lon: -117.0359, bortle: 6, driveMin: 25, place: 'Kumeyaay Lake Campground, Mission Trails Regional Park, San Diego, CA' },
     ];
 
     // ── Astronomy (compact suncalc-style port) ───────────────────────
@@ -313,34 +312,55 @@
         return waxing ? 'Waxing gibbous' : 'Waning gibbous';
     }
 
-    // ── NWS ──────────────────────────────────────────────────────────
-    function parseDuration(iso) {
-        const m = iso.match(/P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/);
-        if (!m) return 0;
-        return ((+(m[1]||0)*24 + +(m[2]||0))*60 + +(m[3]||0)) * 60000;
+    // ── Cloud layers (Open-Meteo) ────────────────────────────────────
+    // One multi-location request: hourly low/mid/high cloud cover per site.
+    async function fetchCloudLayers() {
+        const lats = SITES.map(s => s.lat).join(',');
+        const lons = SITES.map(s => s.lon).join(',');
+        const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high&forecast_days=7&timezone=America%2FLos_Angeles`);
+        if (!r.ok) throw new Error(`Open-Meteo: ${r.status}`);
+        return r.json();
     }
-    function valueAtTime(values, target) {
-        for (const e of values) {
-            const [s, dur] = e.validTime.split('/');
-            const start = new Date(s).getTime();
-            const end = start + parseDuration(dur);
-            if (target >= start && target < end) return e.value;
-        }
-        return null;
-    }
-    async function fetchGrid(grid) {
-        const r = await fetch(`https://api.weather.gov/gridpoints/${grid}`);
-        if (!r.ok) throw new Error(`NWS ${grid}: ${r.status}`);
-        const d = await r.json();
-        return (d.properties?.skyCover?.values) || [];
+    // Open-Meteo hourly times are local-ISO hours; round to the nearest hour.
+    function cloudsAtTime(result, ms) {
+        const rounded = new Date(ms + 1800000);
+        const key = rounded.toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).slice(0, 13).replace(' ', 'T') + ':00';
+        const h = result.hourly;
+        const i = h.time.indexOf(key);
+        if (i === -1) return null;
+        return { low: h.cloud_cover_low[i], mid: h.cloud_cover_mid[i], high: h.cloud_cover_high[i] };
     }
 
     // ── Scoring ──────────────────────────────────────────────────────
-    // For each night: sample every 15 min from sunset to next sunrise.
-    // Dark sample = sun < -18° (astro twilight) AND moon < 0° (below horizon).
-    // Per dark sample: contribution = (1 - cloudFraction) * (15min in hours)
+    // For each night: sample the 8pm–midnight window every 15 min. A sample
+    // counts only during astro dark (sun < -18°). Per-sample credit:
+    //   cloudFactor × moonFactor × hours
+    //   cloudFactor — low/mid clouds squared (broken cloud is worse than the
+    //                 % suggests); thin high cirrus only dims (0.4 weight).
+    //   moonFactor  — 1 below horizon; above, scaled by illumination and an
+    //                 altitude ramp (full strength once the moon is 40° up).
+    // Sky score = quality hours × Bortle bonus. Drive time is applied
+    // separately at ranking time (see driveFactor) so the sky score and the
+    // ntfy alert stay drive-independent.
     // Bortle bonus: B2→1.0, B3→0.85, B4→0.7, B5→0.55, B6→0.4
     function bortleBonus(b) { return Math.max(0.3, 1 - (b - 2) * 0.15); }
+
+    function cloudFactor(c) {
+        const lowMid = Math.min(100, c.low + c.mid);
+        return ((1 - lowMid / 100) ** 2) * (1 - 0.4 * c.high / 100);
+    }
+    function moonFactor(date, lat, lon) {
+        const altDeg = moonAltitude(date, lat, lon) * (180 / PI);
+        if (altDeg <= 0) return 1;
+        return 1 - moonIllumination(date) * Math.min(1, altDeg / 40);
+    }
+    // Weeknights (incl. Friday): close sites should win — long drives only
+    // pay off on Saturday/Sunday nights.
+    function driveFactor(driveMin, nightDate) {
+        const dow = nightDate.getDay();
+        if (dow === 6 || dow === 0) return 1;
+        return 1 / (1 + (driveMin / 60) ** 2);
+    }
 
     // Theoretical ceiling for a night: full astro-dark hours in the window × Bortle 2 bonus (=1).
     // Used to scale the score bar so a perfect winter night fills it; summer nights cap lower.
@@ -363,14 +383,14 @@
     const WINDOW_START_HOUR = 20; // 8pm
     const WINDOW_END_HOUR = 24;   // midnight
 
-    function scoreNight(skyValues, lat, lon, bortle, nightStart) {
+    function scoreNight(siteResult, lat, lon, bortle, nightStart) {
         // nightStart: noon of the day to evaluate. We sample only the usable evening window.
         const STEP_MIN = 15;
         const HOURS_PER = STEP_MIN / 60;
         const windowStartMs = nightStart + (WINDOW_START_HOUR - 12) * 3600000;
         const windowEndMs   = nightStart + (WINDOW_END_HOUR   - 12) * 3600000;
         const samples = Math.round((windowEndMs - windowStartMs) / (STEP_MIN * 60000));
-        let darkH = 0, clearDarkH = 0, totalCloud = 0, cloudSamples = 0;
+        let darkH = 0, qualityH = 0, totalCloud = 0, cloudSamples = 0;
         let moonUpDuringDarkH = 0, moonIllumSum = 0, moonIllumWeight = 0;
         let darkStart = null, darkEnd = null;
         for (let i = 0; i < samples; i++) {
@@ -378,29 +398,25 @@
             const date = new Date(t);
             const sunAlt = sunAltitude(date, lat, lon) * (180 / PI);
             if (sunAlt >= -18) continue;
-            // Skip samples with no NWS cloud forecast — don't penalize with a 50% guess.
-            const cloud = valueAtTime(skyValues, t);
-            if (cloud == null) continue;
-            const moonAlt = moonAltitude(date, lat, lon) * (180 / PI);
-            if (moonAlt > 0) {
-                // Moon up — track stats but don't count toward score or cloud avg.
-                moonUpDuringDarkH += HOURS_PER;
-                moonIllumSum += moonIllumination(date);
-                moonIllumWeight++;
-                continue;
-            }
-            // Moon-down astro-dark sample — counts toward everything.
+            // Skip samples with no cloud forecast — don't penalize with a 50% guess.
+            const c = cloudsAtTime(siteResult, t);
+            if (c === null) continue;
             darkH += HOURS_PER;
             if (darkStart === null) darkStart = t;
             darkEnd = t + STEP_MIN * 60000;
-            totalCloud += cloud;
+            totalCloud += Math.min(100, c.low + c.mid + 0.4 * c.high);
             cloudSamples++;
-            clearDarkH += (1 - cloud / 100) * HOURS_PER;
+            if (moonAltitude(date, lat, lon) > 0) {
+                moonUpDuringDarkH += HOURS_PER;
+                moonIllumSum += moonIllumination(date);
+                moonIllumWeight++;
+            }
+            qualityH += cloudFactor(c) * moonFactor(date, lat, lon) * HOURS_PER;
         }
-        const score = clearDarkH * bortleBonus(bortle);
+        const score = qualityH * bortleBonus(bortle);
         const avgCloud = cloudSamples ? totalCloud / cloudSamples : null;
         const avgMoonIllum = moonIllumWeight ? moonIllumSum / moonIllumWeight : 0;
-        return { score, darkH, clearDarkH, avgCloud, moonUpDuringDarkH, avgMoonIllum, darkStart, darkEnd };
+        return { score, darkH, qualityH, avgCloud, moonUpDuringDarkH, avgMoonIllum, darkStart, darkEnd };
     }
 
     // Approximate Milky Way galactic core visibility check for SD-ish latitude.
@@ -427,10 +443,8 @@
     async function run() {
         const content = document.getElementById('content');
         try {
-            // Fetch all sites in parallel
-            const skyData = await Promise.all(
-                SITES.map(s => fetchGrid(s.grid).catch(err => { console.warn(s.name, err); return []; }))
-            );
+            // One multi-location request covers all sites
+            const cloudData = await fetchCloudLayers();
 
             // Build 7 nights starting tonight (noon today through 7 days)
             const nights = [];
@@ -440,11 +454,12 @@
                 const start = today.getTime() + n * 86400000;
                 const evening = new Date(start);
                 evening.setHours(20, 0, 0, 0);
+                const nightDate = new Date(start);
                 const perSite = SITES.map((site, i) => {
-                    const result = scoreNight(skyData[i], site.lat, site.lon, site.bortle, start);
-                    return { site, ...result };
+                    const result = scoreNight(cloudData[i], site.lat, site.lon, site.bortle, start);
+                    return { site, ...result, rankScore: result.score * driveFactor(site.driveMin, nightDate) };
                 });
-                perSite.sort((a, b) => b.score - a.score);
+                perSite.sort((a, b) => b.rankScore - a.rankScore);
                 const top = perSite[0];
                 const illum = moonIllumination(evening);
                 nights.push({
@@ -459,11 +474,11 @@
                 });
             }
 
-            // Headline = max score across all nights × sites
+            // Headline = max drive-adjusted score across all nights × sites
             let best = null;
             nights.forEach(n => {
                 n.perSite.forEach(p => {
-                    if (!best || p.score > best.score) best = { ...p, night: n };
+                    if (!best || p.rankScore > best.rankScore) best = { ...p, night: n };
                 });
             });
 
@@ -506,7 +521,7 @@
         return `<div class="card headline">
             <div class="headline-label">Best night this week</div>
             <div class="headline-pick"><span class="night">${fmtDay(b.night.date)} ${fmtDate(b.night.date)}</span><span class="sep"> · </span><span class="site">${b.site.name}</span></div>
-            <div class="headline-detail">${b.clearDarkH.toFixed(1)} clear-dark hours · ${cloudTxt} · ${moonTxt} · Bortle ${b.site.bortle} · ${b.site.driveMin} min drive</div>
+            <div class="headline-detail">${b.qualityH.toFixed(1)} quality dark hours · ${cloudTxt} · ${moonTxt} · Bortle ${b.site.bortle} · ${b.site.driveMin} min drive</div>
             ${coreTxt}
         </div>`;
     }
@@ -525,7 +540,7 @@
                             <span class="night-date">${fmtDate(n.date)}</span>
                         </div>
                         <div class="night-site">${t.site.name}</div>
-                        <div class="night-meta">${t.clearDarkH.toFixed(1)}h clear · ${cloud} · 🌙 ${Math.round(n.moonIllum*100)}%</div>
+                        <div class="night-meta">${t.qualityH.toFixed(1)}h quality · ${cloud} · 🌙 ${Math.round(n.moonIllum*100)}%</div>
                         <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
                     </div>`;
                 }).join('')}
